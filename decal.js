@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { frostedPixels } from './engraving-bridge.mjs';
 
 const OFFSET_MM = .05;
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
@@ -126,7 +127,7 @@ export function createDecalEditor({ cup, stage, camera, controls, project, rebui
   const initial = project.design ?? project.defaults;
   const state = {
     lowerMm: initial.lowerMm, upperMm: initial.upperMm, rotationDeg: initial.rotationDeg,
-    showGuides: initial.showGuides ?? true, fileName: '', aspect: 1,
+    showGuides: initial.showGuides ?? true, engraving: initial.engraving === true, fileName: '', aspect: 1,
   };
   const owner = Symbol('cup decal editor');
   activeEditor = owner;
@@ -149,7 +150,7 @@ export function createDecalEditor({ cup, stage, camera, controls, project, rebui
 
   function getDesign() {
     return { lowerMm: state.lowerMm, upperMm: state.upperMm,
-      rotationDeg: state.rotationDeg, showGuides: state.showGuides };
+      rotationDeg: state.rotationDeg, showGuides: state.showGuides, engraving: state.engraving };
   }
 
   function rotationBounds(candidateLayout = layout) {
@@ -180,6 +181,7 @@ export function createDecalEditor({ cup, stage, camera, controls, project, rebui
     rotation.value = String(state.rotationDeg);
     byId('rotation-value').value = `${Number(state.rotationDeg.toFixed(1))}°`;
     byId('guides').checked = state.showGuides;
+    byId('engraving').checked = state.engraving;
   }
 
   function showPanel(open) {
@@ -286,6 +288,11 @@ export function createDecalEditor({ cup, stage, camera, controls, project, rebui
     onChange?.();
   });
   listen(controls, 'change', updateGuides);
+  listen(byId('engraving'), 'change', async event => {
+    if (!originalFile) return;
+    try { await setArtwork(originalFile, { engraving: event.target.checked }); }
+    catch (error) { syncInputs(); message.textContent = error.message; }
+  });
 
   function releaseImage() {
     if (mesh) {
@@ -301,7 +308,7 @@ export function createDecalEditor({ cup, stage, camera, controls, project, rebui
     thumbnailUrl = undefined;
   }
 
-  async function setArtwork(file, { notify = true } = {}) {
+  async function setArtwork(file, { notify = true, engraving = state.engraving, physicalSize } = {}) {
     if (!ownsUI()) throw abortError();
     const ticket = ++generation;
     if (!file || !IMAGE_TYPES.has(file.type)) throw new Error('请选择 PNG、JPG 或 WebP 图片。');
@@ -325,12 +332,26 @@ export function createDecalEditor({ cup, stage, camera, controls, project, rebui
       // Original bytes remain in originalFile; this padded canvas is only the
       // GPU preview. Inset UVs retain the original image's aspect ratio.
       context.drawImage(bitmap, 2, 2, width, height);
+      if (engraving) {
+        const pixels = context.getImageData(0, 0, canvas.width, canvas.height);
+        frostedPixels(pixels.data);
+        context.putImageData(pixels, 0, 0);
+      }
       nextTexture = new THREE.CanvasTexture(canvas);
       nextTexture.colorSpace = THREE.SRGBColorSpace;
       nextTexture.wrapS = nextTexture.wrapT = THREE.ClampToEdgeWrapping;
       nextTexture.name = file.name || 'artwork';
       const aspect = bitmap.width / bitmap.height;
-      const nextLayout = decalLayout(profile, state.lowerMm, state.upperMm, aspect, area.angleLimitsDeg);
+      let lower = state.lowerMm, upper = state.upperMm;
+      if (physicalSize) {
+        if (Math.abs(aspect - physicalSize.widthMm / physicalSize.heightMm) > .001) throw new Error('图片物理比例不符');
+        const height = Math.min(physicalSize.heightMm, (maxHeight - minHeight) * .9);
+        const middle = (minHeight + maxHeight) / 2;
+        if (height < minGap) throw new Error('雕刻图片小于杯型允许的最小高度');
+        lower = middle - height / 2; upper = middle + height / 2;
+      }
+      const nextLayout = decalLayout(profile, lower, upper, aspect, area.angleLimitsDeg);
+      if (physicalSize && nextLayout.upper - nextLayout.lower < minGap) throw new Error('图案比例超出杯型允许范围');
       const rotation = clamp(state.rotationDeg, ...rotationBounds(nextLayout));
       const nextUvBounds = [2 / canvas.width, 2 / canvas.height,
         (width + 2) / canvas.width, (height + 2) / canvas.height];
@@ -338,9 +359,10 @@ export function createDecalEditor({ cup, stage, camera, controls, project, rebui
       // Printed artwork is opaque wherever the PNG has visible ink. A small
       // deterministic alpha cutout preserves antialiased edges without the
       // path tracer's stochastic transparent-surface noise.
-      nextMaterial = new THREE.MeshStandardMaterial({ map: nextTexture, transparent: false,
-        alphaTest: .08, opacity: 1, roughness: .38, metalness: 0, side: THREE.DoubleSide, depthWrite: true });
-      nextMaterial.name = 'Cup body print';
+      nextMaterial = new THREE.MeshStandardMaterial({ map: nextTexture, transparent: engraving,
+        alphaTest: engraving ? 0 : .08, opacity: 1, roughness: engraving ? .92 : .38,
+        metalness: 0, side: THREE.DoubleSide, depthWrite: !engraving });
+      nextMaterial.name = engraving ? 'Cup frosted engraving' : 'Cup body print';
       nextUrl = URL.createObjectURL(file);
 
       clearTimeout(timer);
@@ -351,6 +373,9 @@ export function createDecalEditor({ cup, stage, camera, controls, project, rebui
       layout = nextLayout;
       uvBounds = nextUvBounds;
       state.aspect = aspect;
+      state.engraving = engraving;
+      if (physicalSize) state.showGuides = false;
+      state.lowerMm = lower; state.upperMm = upper;
       state.rotationDeg = rotation;
       state.fileName = file.name || 'artwork';
       mesh = new THREE.Mesh(nextGeometry, nextMaterial);
@@ -446,7 +471,7 @@ export function createDecalEditor({ cup, stage, camera, controls, project, rebui
   fileInput.value = '';
   syncInputs();
   return {
-    setArtwork, getDesign, updateGuides, dispose,
+    setArtwork, getDesign, updateGuides, dispose, showPanel,
     get artworkFile() { return originalFile; },
     get mesh() { return mesh; },
     get state() { return { ...state, lower: state.lowerMm, upper: state.upperMm, rotation: state.rotationDeg }; },

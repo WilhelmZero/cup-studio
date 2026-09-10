@@ -338,3 +338,5 @@ body[data-theme="warm"] .project-message { background: #f2eaddE8; color: #766a59
   .render-link { bottom: 113px; }
   .decal-panel { bottom: 85px; }
 }
+
+.decal-engraving-control { margin: 0 0 22px; line-height: 1.6; }

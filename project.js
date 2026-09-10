@@ -68,6 +68,8 @@ export function validateManifest(input) {
   p.design ??= { ...p.defaults, showGuides: true };
   placement(p.design, '当前贴图范围');
   contents(p.design.contents, '当前杯内内容');
+  p.design.engraving ??= false;
+  assert(typeof p.design.engraving === 'boolean', '雕刻材质设置无效。');
   p.design.showGuides ??= true;
   assert(typeof p.design.showGuides === 'boolean', '范围线设置无效。');
   assert(p.fillArea || !(p.defaults.contents?.enabled || p.design.contents?.enabled), '启用杯内内容的项目缺少内壁轮廓。');

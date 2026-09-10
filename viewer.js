@@ -1,4 +1,7 @@
 import * as THREE from 'three';
+import { externalSession, startReceiver } from './engraving-bridge.mjs';
+const engravingSession = externalSession(location.search);
+let engravingImported = false;
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { WebGLPathTracer } from './vendor/pathtracer/package/src/core/WebGLPathTracer.js';
@@ -94,6 +97,7 @@ let bounds, fitDistance = 40;
 const projectMessage = document.querySelector('#project-message');
 const exampleUrl = './examples/can-glass.cup.zip';
 function message(text, error = false) {
+  if (engravingSession && !engravingImported) return;
   projectMessage.textContent = text;
   projectMessage.classList.toggle('error', error);
 }
@@ -172,7 +176,7 @@ function disposeModel(root) {
 function rebuildScene() {
   if (!cup) return;
   pathTracer.textureSize.set(decalEditor?.hasImage ? 2048 : 256, decalEditor?.hasImage ? 2048 : 256);
-  pathTracer.setScene(scene, camera);
+  return pathTracer.setScene(scene, camera);
 }
 function editorFor(model, manifest) {
   return createDecalEditor({ cup: model, stage, camera, controls, project: manifest, rebuildScene,
@@ -340,7 +344,7 @@ function projectBytes() {
   return writeProjectPackage(activeProject, { ...decalEditor.getDesign(), contents:contentEditor?.getDesign() }, decalEditor.artworkFile, document.body.dataset.theme);
 }
 function scheduleSave(showStatus = true) {
-  if (!activeProject) return;
+  if (engravingSession || !activeProject) return;
   const revision = ++saveRevision;
   clearTimeout(saveTimer);
   if (showStatus) message('正在保存到本机…');
@@ -391,7 +395,7 @@ document.querySelector('#project-save').addEventListener('click', async event =>
 async function start() {
   const ticket = ++importTicket;
   try {
-    const recent = await loadRecentProject();
+    const recent = engravingSession ? null : await loadRecentProject();
     if (ticket !== importTicket) return;
     if (recent) { await openProject(recent, { restored: true, ticket }); return; }
   } catch { message('上次项目未能恢复，正在打开内置示例。', true); }
@@ -404,7 +408,27 @@ async function start() {
     status.textContent = '请导入杯型项目';
   }
 }
-start();
+const startup = start();
+if (engravingSession) {
+  const bridgeStatus = projectMessage;
+  bridgeStatus.hidden = false;
+  const stopBridge = startReceiver(engravingSession, async payload => {
+    await startup;
+    if (!activeProject || !decalEditor) throw new Error('默认杯型未就绪');
+    const bitmap = await createImageBitmap(payload.blob);
+    const valid = bitmap.width === payload.width && bitmap.height === payload.height;
+    bitmap.close();
+    if (!valid) throw new Error('图片像素尺寸不符');
+    await decalEditor.setArtwork(new File([payload.blob], payload.name, { type: 'image/png' }), {
+      notify: false, engraving: true, physicalSize: payload,
+    });
+    await rebuildScene();
+    decalEditor.showPanel(true);
+    engravingImported = true;
+    return decalEditor.layout.upper - decalEditor.layout.lower < payload.heightMm - .1 ? '（已等比缩小适配杯身）' : '';
+  }, text => { bridgeStatus.textContent = text; });
+  window.addEventListener('pagehide', stopBridge, { once: true });
+}
 
 document.querySelectorAll('button[data-theme]').forEach(button => button.addEventListener('click', () => {
   setTheme(button.dataset.theme);
