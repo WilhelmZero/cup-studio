@@ -43,7 +43,14 @@
       <p id="spec-description">导入项目，查看杯型与定制效果。</p>
       <dl><div><dt>杯高</dt><dd><span id="spec-height">—</span> <small>mm</small></dd></div><div><dt>杯口外径</dt><dd><span id="spec-mouth">—</span> <small>mm</small></dd></div></dl>
       <span id="spec-sources" class="note"></span>
-      <button id="project-example" class="project-example" type="button" title="打开内置示例">内置示例 <span aria-hidden="true">↗</span></button>
+      <label class="project-example" for="project-example">
+        <span>内置模型</span>
+        <select id="project-example" aria-label="选择内置杯型模型">
+          <option value="">选择杯型</option>
+          <option value="can">罐形玻璃杯</option>
+          <option value="stemmed">高脚玻璃杯</option>
+        </select>
+      </label>
     </section>
     <div class="status"><i></i><span id="status-text">加载中</span><span id="render-progress" class="render-progress" role="progressbar" aria-label="高质量玻璃渲染进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" hidden><b></b></span><span id="render-percent" class="render-percent" hidden>0%</span></div>
 

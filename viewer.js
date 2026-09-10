@@ -95,7 +95,11 @@ let importTicket = 0, saveRevision = 0, saveTimer, activationQueue = Promise.res
 let switchingProject = false, exportDone = Promise.resolve();
 let bounds, fitDistance = 40;
 const projectMessage = document.querySelector('#project-message');
-const exampleUrl = './examples/can-glass.cup.zip';
+const exampleSelect = document.querySelector('#project-example');
+const exampleProjects = {
+  can: { id: 'clear-can-glass', url: './examples/can-glass.cup.zip' },
+  stemmed: { id: 'stemmed-wine-glass', url: './examples/stemmed-wine-glass.cup.zip' },
+};
 function message(text, error = false) {
   if (engravingSession && !engravingImported) return;
   projectMessage.textContent = text;
@@ -218,6 +222,7 @@ function updateProjectInfo() {
   }
   document.querySelector('#project-save').disabled = false;
   document.querySelector('.download').setAttribute('aria-disabled', 'false');
+  exampleSelect.value = Object.entries(exampleProjects).find(([, example]) => example.id === p.id)?.[0] || '';
 }
 function setTheme(theme, save = true) {
   document.body.dataset.theme = theme;
@@ -374,12 +379,24 @@ document.querySelector('#project-file').addEventListener('change', event => {
   event.target.value = '';
   if (file) openProject(file).catch(() => {});
 });
-async function loadExample(ticket = ++importTicket) {
-  const response = await fetch(exampleUrl);
+async function loadExample(key = 'can', ticket = ++importTicket) {
+  const example = exampleProjects[key];
+  if (!example) throw new Error('请选择有效的内置杯型。');
+  const response = await fetch(example.url);
   if (!response.ok) throw new Error('内置示例未能加载。');
   await openProject(await response.arrayBuffer(), { ticket });
 }
-document.querySelector('#project-example').addEventListener('click', () => loadExample().catch(error => message(error.message, true)));
+exampleSelect.addEventListener('change', async event => {
+  const key = event.target.value;
+  if (!key) return;
+  event.target.disabled = true;
+  message('正在切换内置杯型…');
+  try { await loadExample(key); }
+  catch (error) {
+    if (activeProject) updateProjectInfo();
+    message(error.message, true);
+  } finally { event.target.disabled = false; }
+});
 document.querySelector('#project-save').addEventListener('click', async event => {
   if (switchingProject) { message('正在切换项目，请稍后保存。'); return; }
   const button = event.currentTarget;
@@ -400,7 +417,7 @@ async function start() {
     if (recent) { await openProject(recent, { restored: true, ticket }); return; }
   } catch { message('上次项目未能恢复，正在打开内置示例。', true); }
   if (ticket !== importTicket) return;
-  try { await loadExample(ticket); }
+  try { await loadExample('can', ticket); }
   catch (error) {
     message(error.message, true);
     loading.classList.add('done');
