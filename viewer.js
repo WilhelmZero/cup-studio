@@ -99,6 +99,7 @@ const exampleSelect = document.querySelector('#project-example');
 const exampleProjects = {
   can: { id: 'clear-can-glass', url: './examples/can-glass.cup.zip' },
   stemmed: { id: 'stemmed-wine-glass', url: './examples/stemmed-wine-glass.cup.zip' },
+  shot: { id: 'tall-shot-glass', url: './examples/tall-shot-glass.cup.zip' },
 };
 function message(text, error = false) {
   if (engravingSession && !engravingImported) return;
